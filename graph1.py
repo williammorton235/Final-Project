@@ -11,6 +11,9 @@ from sklearn.utils import resample
 from sklearn import linear_model
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import cross_val_score
+from skopt import gp_minimize
+from skopt.space import Real
+from skopt import BayesSearchCV
 import matplotlib.pyplot as plt
 
 from imblearn.over_sampling import SMOTE
@@ -19,7 +22,7 @@ from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import BorderlineSMOTE
 
-
+from joblib import Parallel, delayed
 # test
 
 
@@ -46,17 +49,17 @@ def downsample(X_train, y_train):
         pass
         #print("Insufficient Data")
     # Downsample majority class
-    #df_majority_downsampled = resample(majority, replace=False, n_samples=len(minority))
-    try:
+    df_majority_downsampled = resample(majority, replace=False, n_samples=len(minority))
+    """try:
         oversample = SMOTE()
         X_train, y_train = oversample.fit_resample(X_train, y_train)
     except:
         oversample = RandomOverSampler()
-        X_train, y_train = oversample.fit_resample(X_train, y_train)
+        X_train, y_train = oversample.fit_resample(X_train, y_train)"""
 
-    #downsample = pd.concat([df_majority_downsampled, minority])
-    #X_train = downsample.drop(['y'], axis=1).values
-    #y_train = downsample['y'].values
+    downsample = pd.concat([df_majority_downsampled, minority])
+    X_train = downsample.drop(['y'], axis=1).values
+    y_train = downsample['y'].values
     return X_train, y_train
 
 
@@ -99,30 +102,54 @@ def f_importances(coef, names):
     plt.show()
 
 
+def objective(params, X, y):
+    c = params[0]
+    clf = svm.LinearSVC(C=c, penalty='l2', loss='squared_hinge', dual=True, fit_intercept=True)
+    score = cross_val_score(clf, X, y, cv=3).mean()
+    return -score
+
+
+def train_svm(X_train, y_train, X_test, y_test, features, c):
+    X_train_downsample, y_train_downsample = downsample(X_train, y_train)
+    svmodel = svm.LinearSVC(penalty='l2', loss='squared_hinge', dual=True, fit_intercept=True)
+    print(c)
+    try:
+        opt = BayesSearchCV(
+            svmodel,
+            {
+                'C': (c/4, c*4, 'log-uniform'),
+            },
+            n_iter=32,
+            cv=3
+        )
+
+        opt.fit(X_train, y_train)
+        #svmodel.fit(X_train_downsample, y_train_downsample)
+        pred = opt.predict(X_test)
+        return np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features
+    except:
+        return None
+
+
 def SVM(window, c, offset, X, y, names):
-    features = names*window
-    # create rolling window of size 6
+    features = names * window
     X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y)
-    # print(X_train, X_test, y_train, y_test)
-    results = pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
-    for i in range(100):
-        if len(set(y_train)) == 1:
-            return results
-        else:
-            X_train_downsample, y_train_downsample = downsample(X_train, y_train)
-            # print(X_train_downsample, y_train_downsample)
-            # print(X_train, X_test, y_train, y_test)
-            #param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000], 'kernel': ['linear']}
-            #grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
-            #grid.fit(X_train, y_train)
-            #best_params = grid.best_params_
-            svmodel = svm.LinearSVC(C=c)
-            #svmodel = linear_model.LogisticRegression()
-            svmodel.fit(X_train_downsample, y_train_downsample)
-            pred = svmodel.predict(X_test)
-        results.loc[len(results)] = [np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features]
-    results = results.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
-    return results
+
+    if len(set(y_train)) == 1:
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
+
+    results = Parallel(n_jobs=-1)(
+        delayed(train_svm)(X_train, y_train, X_test, y_test, features, c)
+        for _ in range(100)
+    )
+
+    try:
+        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features'])
+        results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
+    except:
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
+
+    return results_df
 
 
 def main():
@@ -134,6 +161,7 @@ def main():
     experiment = 1
     data = pd.read_csv('Data//Data_EuroDollar_Avg.csv')
     data = data.dropna()
+    data = data[:int(len(data)/4)]
     prognoza = []
     test = []
     importances = []
