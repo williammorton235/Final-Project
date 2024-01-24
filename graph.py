@@ -44,19 +44,19 @@ def downsample(X_train, y_train):
     minority = traind[traind['y'] != majority_val]
     if len(minority) < len(traind) / 10:
         pass
-        #print("Insufficient Data")
+        print("Insufficient Data")
     # Downsample majority class
-    #df_majority_downsampled = resample(majority, replace=False, n_samples=len(minority))
-    try:
+    df_majority_downsampled = resample(majority, replace=False, n_samples=len(minority))
+    """try:
         oversample = SMOTE()
         X_train, y_train = oversample.fit_resample(X_train, y_train)
     except:
         oversample = RandomOverSampler()
-        X_train, y_train = oversample.fit_resample(X_train, y_train)
+        X_train, y_train = oversample.fit_resample(X_train, y_train)"""
 
-    #downsample = pd.concat([df_majority_downsampled, minority])
-    #X_train = downsample.drop(['y'], axis=1).values
-    #y_train = downsample['y'].values
+    downsample = pd.concat([df_majority_downsampled, minority])
+    X_train = downsample.drop(['y'], axis=1).values
+    y_train = downsample['y'].values
     return X_train, y_train
 
 
@@ -77,14 +77,14 @@ def createRollingWindow(window, offset, X, y):
 
 
 def crossValidation(offset, X, y):
-    for lag in range(1,7):
+    for lag in range(1, 7):
         scores = {}
         X_train, X_test, y_train, y_test = createRollingWindow(lag, offset, X, y)
         param_grid = {'C': [0.01, 0.1, 1, 10, 100], 'kernel': ['linear']}
         grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
         grid.fit(X_train, y_train)
         c = grid.best_params_['C']
-        clf = svm.SVC(kernel='linear', C=c)
+        clf = svm.SVC(kernel='linear', C=c, dual='auto')
         cv_scores = cross_val_score(clf, X_train, y_train, cv=3)
         scores[lag] = [sum(cv_scores) / len(cv_scores), c]
     window = max(scores, key=scores.get)
@@ -112,11 +112,11 @@ def SVM(window, c, offset, X, y, names):
             X_train_downsample, y_train_downsample = downsample(X_train, y_train)
             # print(X_train_downsample, y_train_downsample)
             # print(X_train, X_test, y_train, y_test)
-            #param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000], 'kernel': ['linear']}
-            #grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
-            #grid.fit(X_train, y_train)
-            #best_params = grid.best_params_
-            svmodel = svm.LinearSVC(C=c)
+            param_grid = {'C': np.arange(c/4, c*4, c/4).tolist(), 'kernel': ['linear']}
+            grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
+            grid.fit(X_train, y_train)
+            best_params = grid.best_params_
+            svmodel = svm.LinearSVC(C=c, dual='auto')
             #svmodel = linear_model.LogisticRegression()
             svmodel.fit(X_train_downsample, y_train_downsample)
             pred = svmodel.predict(X_test)
@@ -133,7 +133,7 @@ def main():
     c = 1
     experiment = 1
     data = pd.read_csv('Data//Data_EuroDollar_Avg.csv')
-    data = data.dropna()
+    data = data.dropna()[:int(len(data)/4)]
     prognoza = []
     test = []
     importances = []

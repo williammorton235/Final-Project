@@ -102,19 +102,11 @@ def f_importances(coef, names):
     plt.show()
 
 
-def objective(params, X, y):
-    c = params[0]
-    clf = svm.LinearSVC(C=c, penalty='l2', loss='squared_hinge', dual=True, fit_intercept=True)
-    score = cross_val_score(clf, X, y, cv=3).mean()
-    return -score
-
-
-def train_svm(X_train, y_train, X_test, y_test, features, c):
+def train_lr(X_train, y_train, X_test, y_test, features, c):
     X_train_downsample, y_train_downsample = downsample(X_train, y_train)
-    svmodel = svm.LinearSVC(penalty='l2', loss='squared_hinge', dual=True, fit_intercept=True)
-    print(c)
+    svmodel = linear_model.LogisticRegression(C=c, solver='liblinear')
     try:
-        opt = BayesSearchCV(
+        """opt = BayesSearchCV(
             svmodel,
             {
                 'C': (c/4, c*4, 'log-uniform'),
@@ -123,19 +115,85 @@ def train_svm(X_train, y_train, X_test, y_test, features, c):
             cv=3
         )
 
-        opt.fit(X_train, y_train)
+        opt.fit(X_train_downsample, y_train_downsample)"""
         #svmodel.fit(X_train_downsample, y_train_downsample)
-        pred = opt.predict(X_test)
+        #param_grid = {'C': np.arange(c / 4, c * 4, c / 4).tolist(), 'kernel': ['linear']}
+        #grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
+        #grid.fit(X_train, y_train)
+        svmodel.fit(X_train_downsample, y_train_downsample)
+        pred = svmodel.predict(X_test)
         return np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features
+    except Exception as e:
+        print(e)
+        return None
+
+
+def logisticRegression(window, c, offset, X, y, names):
+    features = names * window
+    #print(X, y)
+    X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y)
+    print(y_test)
+
+    if len(set(y_train)) == 1:
+        print("x")
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
+
+    results = Parallel(n_jobs=-1)(
+        delayed(train_lr)(X_train, y_train, X_test, y_test, features, c)
+        for _ in range(100)
+    )
+
+    try:
+        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features'])
+        #results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
+        return results_df
     except:
+        print("x")
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
+
+
+
+def objective(params, X, y):
+    c = params[0]
+    clf = svm.LinearSVC(C=c, penalty='l2', loss='squared_hinge', dual='auto', fit_intercept=True)
+    score = cross_val_score(clf, X, y, cv=3).mean()
+    return -score
+
+
+def train_svm(X_train, y_train, X_test, y_test, features, c):
+    X_train_downsample, y_train_downsample = downsample(X_train, y_train)
+    svmodel = svm.LinearSVC(penalty='l2', loss='squared_hinge', dual='auto', fit_intercept=True)
+    try:
+        """opt = BayesSearchCV(
+            svmodel,
+            {
+                'C': (c/4, c*4, 'log-uniform'),
+            },
+            n_iter=32,
+            cv=3
+        )
+
+        opt.fit(X_train_downsample, y_train_downsample)"""
+        #svmodel.fit(X_train_downsample, y_train_downsample)
+        param_grid = {'C': np.arange(c / 4, c * 4, c / 4).tolist(), 'kernel': ['linear']}
+        grid = GridSearchCV(svm.SVC(), param_grid, scoring='accuracy', cv=3)
+        grid.fit(X_train, y_train)
+        pred = grid.predict(X_test)
+        return np.linalg.norm(grid.best_estimator_.coef_[0]), pred, y_test, grid.best_estimator_.coef_[0], features
+    except Exception as e:
+        print(e)
         return None
 
 
 def SVM(window, c, offset, X, y, names):
+    print("x")
     features = names * window
+    print(X, y)
     X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y)
+    print(y_train)
 
     if len(set(y_train)) == 1:
+        print("x")
         return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
 
     results = Parallel(n_jobs=-1)(
@@ -161,29 +219,27 @@ def main():
     experiment = 1
     data = pd.read_csv('Data//Data_EuroDollar_Avg.csv')
     data = data.dropna()
-    data = data[:int(len(data)/4)]
+    #data = data[:int(len(data)/2)]
     prognoza = []
     test = []
     importances = []
 
     for i in range(len(data)-(training+horizon)):
+        print(i)
         X = data.iloc[i:i+training+offset, 1:]
         X = selectExperiment(X, experiment)
         names = X.columns
         X = X.values
         y = data.iloc[i:i+training+horizon+offset, 1].values
         y = np.sign([y[i + horizon] - y[i] for i in range(len(y) - horizon)])
-
-        try:
-            pass
-            #window, c = crossValidation(offset, X, y)
-        except:
+        if len(X) != len(y):
             continue
 
-
-        results = SVM(window, c, offset, X, y, names)
+        results = logisticRegression(window, c, offset, X, y, names)
         if results.empty:
+            print("1x")
             continue
+        #print(results["test"])
         for index, row in results.iterrows():
             weights = [abs(x) for x in row['coef']]
             total = sum(weights)
@@ -191,12 +247,14 @@ def main():
             importances.append([x/total for x in weights])
             prognoza.append(row['pred'])
             test.append(row['test'])
+        #print(prognoza, test)
+        #input()
 
         # find best constraints
-        bestconstraints = pandas.DataFrame(columns=['accuracy', 'window', 'c'])
+        """bestconstraints = pandas.DataFrame(columns=['accuracy', 'window', 'c'])
         for testwindow in [1, 2, 3, 4, 5, 6]:
             for testc in [0.001, 0.01, 0.1, 1, 10, 100, 1000]:
-                results = SVM(testwindow, testc, offset, X, y, names)
+                results = logisticRegression(testwindow, testc, offset, X, y, names)
                 if results.empty:
                     continue
                 testprognoza = []
@@ -207,9 +265,11 @@ def main():
                     bestconstraints.loc[len(bestconstraints)] = [metrics.accuracy_score(testtest, testprognoza), testwindow, testc]
         bestconstraints = bestconstraints.sort_values('accuracy', ascending=False, ignore_index=True)
         window = int(bestconstraints.iloc[0]['window'])
-        c = bestconstraints.iloc[0]['c']
+        c = bestconstraints.iloc[0]['c']"""
 
-    print(prognoza, "\n", test)
+    prognoza = [x[0] for x in prognoza]
+    print(prognoza.count(1.0))
+    print("test", test, "\n", "preds", prognoza)
     print(metrics.classification_report(test, prognoza))
     #print(results.iloc[0]['coef'])
     importances = np.array(importances)
