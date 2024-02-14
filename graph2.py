@@ -1,15 +1,10 @@
-def warn(*args, **kwargs):
-    pass
-import warnings
-warnings.warn = warn
-
 import pandas
 import pandas as pd
 import numpy as np
 np.set_printoptions(suppress=True)
 from sklearn import svm
 from sklearn import metrics
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 import sklearn.preprocessing as test
 from sklearn.ensemble import BaggingClassifier
 from sklearn.utils import resample
@@ -22,6 +17,8 @@ from skopt.space import Real
 from skopt import BayesSearchCV
 import matplotlib.pyplot as plt
 
+from sklearn_lvq import GmlvqModel
+
 from imblearn.over_sampling import SMOTE
 from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
@@ -29,10 +26,7 @@ from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import BorderlineSMOTE
 
 from joblib import Parallel, delayed
-
-import mat4py as m4p
 # test
-
 
 
 def selectExperiment(data, experiment):
@@ -72,39 +66,13 @@ def downsample(X_train, y_train):
     return X_train, y_train
 
 
-def createRollingWindow(window, offset, X, y, names):
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X)
+def createRollingWindow(window, offset, X, y):
     X_train = X[:-offset]
     X_test = X[-window:]
     # scale data
-    #print(X_train, '\n', X_test)
-    #print(X_train.shape)
-    """temp_train = pd.DataFrame(X_train, columns=names)
-    temp_test = pd.DataFrame(X_test, columns=names)
-    print(temp_train[[names[0]]])
-    print(temp_test[[names[0]]])
-    temp_scaler = MinMaxScaler()
-    print(temp_scaler.fit_transform(temp_train[[names[0]]]))
-    print(temp_scaler.transform(temp_test[[names[0]]]))
-    input()
-    for name in names:
-        temp_scaler = StandardScaler()
-        temp_train[name] = temp_scaler.fit(temp_train[[name]])
-        temp_train[name] = temp_scaler.transform(temp_train[[name]])
-        temp_test[name] = temp_scaler.transform(temp_test[[name]])
-    X_train = temp_train.values
-    X_test = temp_test.values
-    print(X_train, '\n', X_test)
-    input()"""
-
-
-    #scaler = StandardScaler()
-    #X_train = scaler.fit_transform(X_train)
-    #X_test = scaler.transform(X_test)
-    #print(scaler.get_params())
-    #print(X_train, '\n', X_test)
-    #input()
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
     X_train = np.array([X_train[j - window:j, :].flatten() for j in range(window, len(X_train))])
     X_test = np.array(X_test.flatten())
     y_roll = y[window:]
@@ -112,21 +80,6 @@ def createRollingWindow(window, offset, X, y, names):
     y_test = y_roll[-1]
     X_test = [X_test]
     return X_train, X_test, y_train, y_test
-
-
-def createRollingWindow1(window, offset, X, y):
-    X = X[window:] - X[:-window]
-    X_train = X[:-offset]
-    X_test = X[-1:]
-    y = y[window:]
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
-    y_train = y[:-offset]
-    y_test = y[-1]
-    #X_test = [X_test]
-    return X_train, X_test, y_train, y_test
-
 
 
 def crossValidation(offset, X, y):
@@ -154,7 +107,7 @@ def f_importances(coef, names):
 
 def train_lr(X_train, y_train, X_test, y_test, features, c):
     X_train_downsample, y_train_downsample = downsample(X_train, y_train)
-    svmodel = linear_model.LogisticRegression(C=c, solver='lbfgs')
+    svmodel = linear_model.LogisticRegression(C=c, solver='liblinear')
     try:
         """opt = BayesSearchCV(
             svmodel,
@@ -172,7 +125,7 @@ def train_lr(X_train, y_train, X_test, y_test, features, c):
         #grid.fit(X_train, y_train)
         svmodel.fit(X_train_downsample, y_train_downsample)
         pred = svmodel.predict(X_test)
-        return np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features, c
+        return np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features
     except Exception as e:
         print(e)
         return None
@@ -180,29 +133,26 @@ def train_lr(X_train, y_train, X_test, y_test, features, c):
 
 def logisticRegression(window, c, offset, X, y, names):
     features = names * window
-    X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y, names)
+    #print(X, y)
+    X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y)
+    print(y_test)
 
     if len(set(y_train)) == 1:
-        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
+        print("x")
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
 
-    # X_train_downsample, y_train_downsample = downsample(X_train, y_train)
-    # list1 = np.concatenate([X_train_downsample, X_test])
-    # list2 = np.concatenate([y_train_downsample, [y_test]])
-    # data = {'fvec': list1.tolist(), 'lbl': list2.tolist()}
-    # m4p.savemat('datafile' + str(n) + '.mat', data)
-    # input()
     results = Parallel(n_jobs=-1)(
         delayed(train_lr)(X_train, y_train, X_test, y_test, features, c)
         for _ in range(100)
     )
 
     try:
-        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
-        results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
+        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features'])
+        #results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
+        return results_df
     except:
-        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
-
-    return results_df
+        print("x")
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
 
 
 def objective(params, X, y):
@@ -212,75 +162,47 @@ def objective(params, X, y):
     return -score
 
 
-def train_svm(X_train, y_train, X_test, y_test, features, c, test):
+def train_svm(X_train, y_train, X_test, y_test, features, c):
     X_train_downsample, y_train_downsample = downsample(X_train, y_train)
     try:
-        """opt = BayesSearchCV(
-            svmodel,
-            {
-                'C': (c/4, c*4, 'log-uniform'),
-            },
-            n_iter=32,
-            cv=3
-        )
-
-        opt.fit(X_train_downsample, y_train_downsample)"""
-        #svmodel.fit(X_train_downsample, y_train_downsample)
-        if test == False:
-            grid = svm.LinearSVC(C=c, dual='auto', max_iter=100000)
-            #loo = LeaveOneOut()
-            #C_range = np.logspace(-5, 5, 20)
-            #param_grid = dict(C=C_range)
-            #grid = GridSearchCV(svm.LinearSVC(dual='auto', max_iter=100000), param_grid, scoring='accuracy', cv=loo)
-
-            grid.fit(X_train_downsample, y_train_downsample)
-            pred = grid.predict(X_test)
-            return 1, pred, y_test, [1] * len(features), features, c#grid.best_params_['C']
-        else:
-
-            svmodel = svm.LinearSVC(C=c, dual='auto', max_iter=100000)
-            svmodel.fit(X_train_downsample, y_train_downsample)
-            pred = svmodel.predict(X_test)
-            return 1, pred, y_test, [1]*len(features), features, c
-        return np.linalg.norm(svmodel.coef_[0]), pred, y_test, svmodel.coef_[0], features
+        model = GmlvqModel(prototypes_per_class=2)
+        model.fit(np.array(X_train_downsample), np.array(y_train_downsample))
+        pred = model.predict(X_test)
+        return 1, pred, y_test, [1]*len(features), features
     except Exception as e:
         print(e)
         return None
 
 
-def SVM(window, c, offset, X, y, names, test, n):
+def SVM(window, c, offset, X, y, names):
     features = names * window
-    X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y, names)
-
+    #print(X, y)
+    X_train, X_test, y_train, y_test = createRollingWindow(window, offset, X, y)
+    #print(y_train)
 
     if len(set(y_train)) == 1:
-        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
+        #print("x")
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
 
-    #X_train_downsample, y_train_downsample = downsample(X_train, y_train)
-    #list1 = np.concatenate([X_train_downsample, X_test])
-    #list2 = np.concatenate([y_train_downsample, [y_test]])
-    #data = {'fvec': list1.tolist(), 'lbl': list2.tolist()}
-    #m4p.savemat('datafile' + str(n) + '.mat', data)
-    #input()
     results = Parallel(n_jobs=-1)(
-        delayed(train_svm)(X_train, y_train, X_test, y_test, features, c, test)
+        delayed(train_svm)(X_train, y_train, X_test, y_test, features, c)
         for _ in range(100)
     )
 
     try:
-        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
-        results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)[:10]
+        results_df = pd.DataFrame(results, columns=['w', 'pred', 'test', 'coef', 'features'])
+        results_df = results_df.sort_values(by=['w'], ascending=False).reset_index(drop=True)#[:10]
     except:
-        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features', 'c'])
+        return pd.DataFrame(columns=['w', 'pred', 'test', 'coef', 'features'])
 
     return results_df
 
 
 def main():
-    training = 24
-    horizon = 6
-    offset = 6
-    window = 3
+    training = 18
+    horizon = 24
+    offset = 23
+    window = 6
     c = 1
     experiment = 1
     data = pd.read_csv('Data//Data_EuroDollar_Avg.csv')
@@ -289,8 +211,6 @@ def main():
     prognoza = []
     test = []
     importances = []
-    clist = []
-    w = []
 
     for i in range(len(data)-(training+horizon)):
         print(i)
@@ -300,14 +220,10 @@ def main():
         X = X.values
         y = data.iloc[i:i+training+horizon+offset, 1].values
         y = np.sign([y[i + horizon] - y[i] for i in range(len(y) - horizon)])
-        y[y == -1] = 2
-        #print(len(X))
-        #input()
         if len(X) != len(y):
             continue
 
-        results = SVM(window, c, offset, X, y, names, False, i)
-        #results = logisticRegression(window, c, offset, X, y, names)
+        results = SVM(window, c, offset, X, y, names)
         if results.empty:
             #print("1x")
             continue
@@ -319,21 +235,14 @@ def main():
             importances.append([x/total for x in weights])
             prognoza.append(row['pred'])
             test.append(row['test'])
-            w.append(results['w'])
-            clist.append(results['c'])
         #print(prognoza, test)
         #input()
 
-        clist1 = []
-        for list in clist:
-            clist1.append(list.mean())
-        c = sum(clist1) / len(clist1)
         # find best constraints
-        bestconstraints = pandas.DataFrame(columns=['accuracy', 'window', 'c'])
+        """bestconstraints = pandas.DataFrame(columns=['accuracy', 'window', 'c'])
         for testwindow in [1, 2, 3, 4, 5, 6]:
-            for testc in [0.001, 0.01, 0.1, 1, 10, 100, 1000]:#, 10000, 100000]:0.00001, 0.0001,
-                results = SVM(testwindow, testc, offset, X, y, names, True, i)
-                #results = logisticRegression(window, c, offset, X, y, names)
+            for testc in [0.001, 0.01, 0.1, 1, 10, 100, 1000]:
+                results = SVM(testwindow, testc, offset, X, y, names)
                 if results.empty:
                     continue
                 testprognoza = []
@@ -344,10 +253,9 @@ def main():
                     bestconstraints.loc[len(bestconstraints)] = [metrics.accuracy_score(testtest, testprognoza), testwindow, testc]
         bestconstraints = bestconstraints.sort_values('accuracy', ascending=False, ignore_index=True)
         window = int(bestconstraints.iloc[0]['window'])
-        c = bestconstraints.iloc[0]['c']
+        c = bestconstraints.iloc[0]['c']"""
 
     prognoza = [x[0] for x in prognoza]
-    print(sum(w)/len(w))
     print(prognoza.count(1.0))
     print("test", test, "\n", "preds", prognoza)
     print(metrics.classification_report(test, prognoza))
