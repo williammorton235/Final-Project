@@ -73,10 +73,19 @@ def downsample(X_train, y_train):
 
 
 def createRollingWindow(window, offset, X, y, names):
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X)
+    #scaler = StandardScaler()
+    #X = scaler.fit_transform(X)
+    #X = np.diff(X, axis=0)
+    #print(X, len(X))
+    X = X[12:] - X[:-12]
+    #print(X, len(X))
+    #print(y, len(y))
+    y = y[12:]
+    #print(y, len(y))
     X_train = X[:-offset]
     X_test = X[-window:]
+    #print(X_train)
+    #print(X_test)
     # scale data
     #print(X_train, '\n', X_test)
     #print(X_train.shape)
@@ -99,24 +108,29 @@ def createRollingWindow(window, offset, X, y, names):
     input()"""
 
 
-    #scaler = StandardScaler()
-    #X_train = scaler.fit_transform(X_train)
-    #X_test = scaler.transform(X_test)
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
     #print(scaler.get_params())
     #print(X_train, '\n', X_test)
     #input()
     X_train = np.array([X_train[j - window:j, :].flatten() for j in range(window, len(X_train))])
     X_test = np.array(X_test.flatten())
+    #print(X_train)
+    #print(X_test)
     y_roll = y[window:]
     y_train = y_roll[:-offset]
     y_test = y_roll[-1]
     X_test = [X_test]
+    #print(y_train)
+    #print(y_test)
+    #input()
     return X_train, X_test, y_train, y_test
 
 
 def createRollingWindow1(window, offset, X, y):
     X = X[window:] - X[:-window]
-    X_train = X[:-offset]
+    X_train = X[:-2*offset]
     X_test = X[-1:]
     y = y[window:]
     scaler = StandardScaler()
@@ -277,10 +291,10 @@ def SVM(window, c, offset, X, y, names, test, n):
 
 
 def main():
-    training = 24
-    horizon = 6
-    offset = 6
-    window = 3
+    training = 30
+    horizon = 12
+    offset = 12
+    window = 6
     c = 1
     experiment = 1
     data = pd.read_csv('Data//Data_EuroDollar_Avg.csv')
@@ -294,11 +308,11 @@ def main():
 
     for i in range(len(data)-(training+horizon)):
         print(i)
-        X = data.iloc[i:i+training+offset, 1:]
+        X = data.iloc[i:i+training+offset+horizon, 1:]
         X = selectExperiment(X, experiment)
         names = X.columns
         X = X.values
-        y = data.iloc[i:i+training+horizon+offset, 1].values
+        y = data.iloc[i:i+training+horizon+offset+horizon, 1].values
         y = np.sign([y[i + horizon] - y[i] for i in range(len(y) - horizon)])
         y[y == -1] = 2
         #print(len(X))
