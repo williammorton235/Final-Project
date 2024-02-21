@@ -77,13 +77,13 @@ def createRollingWindow(window, offset, X, y, names):
     #X = scaler.fit_transform(X)
     #X = np.diff(X, axis=0)
     #print(X, len(X))
-    X = X[12:] - X[:-12]
+    #X = X[12:] - X[:-12]
     #print(X, len(X))
     #print(y, len(y))
-    y = y[12:]
+    #y = y[12:]
     #print(y, len(y))
-    X_train = X[:-offset]
-    X_test = X[-window:]
+    #X_train = X[:-offset]
+    #X_test = X[-window:]
     #print(X_train)
     #print(X_test)
     # scale data
@@ -108,20 +108,31 @@ def createRollingWindow(window, offset, X, y, names):
     input()"""
 
 
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    #scaler = StandardScaler()
+    #X_train = scaler.fit_transform(X_train)
+    #X_test = scaler.transform(X_test)
     #print(scaler.get_params())
     #print(X_train, '\n', X_test)
     #input()
-    X_train = np.array([X_train[j - window:j, :].flatten() for j in range(window, len(X_train))])
-    X_test = np.array(X_test.flatten())
+    X = np.array([X[j - window:j, :].flatten() for j in range(window, len(X))])
+    X = X[12:] - X[:-12]
+    y = y[12:]
+    #print(X)
+    #print(len(X))
+    #input()
+    X_train = X[:-offset]
+    X_test = X[-1]
+    #X_train = np.array([X_train[j - window:j, :].flatten() for j in range(window, len(X_train))])
+    #X_test = np.array(X_test.flatten())
     #print(X_train)
     #print(X_test)
     y_roll = y[window:]
     y_train = y_roll[:-offset]
     y_test = y_roll[-1]
     X_test = [X_test]
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
     #print(y_train)
     #print(y_test)
     #input()
@@ -140,7 +151,6 @@ def createRollingWindow1(window, offset, X, y):
     y_test = y[-1]
     #X_test = [X_test]
     return X_train, X_test, y_train, y_test
-
 
 
 def crossValidation(offset, X, y):
@@ -291,7 +301,7 @@ def SVM(window, c, offset, X, y, names, test, n):
 
 
 def main():
-    training = 30
+    training = 18
     horizon = 12
     offset = 12
     window = 6
